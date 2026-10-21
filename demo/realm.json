@@ -1,0 +1,33 @@
+{
+  "realm": "neo4j",
+  "enabled": true,
+  "sslRequired": "none",
+  "groups": [{"name": "neo4j-users"}],
+  "clients": [{
+    "clientId": "neo4j-community-sso",
+    "protocol": "openid-connect",
+    "enabled": true,
+    "publicClient": true,
+    "standardFlowEnabled": true,
+    "directAccessGrantsEnabled": false,
+    "redirectUris": ["http://localhost:7476/oauth2/callback"],
+    "webOrigins": ["http://localhost:7476"],
+    "attributes": {"pkce.code.challenge.method": "S256"},
+    "protocolMappers": [{
+      "name": "groups", "protocol": "openid-connect",
+      "protocolMapper": "oidc-group-membership-mapper",
+      "config": {
+        "claim.name": "groups", "full.path": "false",
+        "access.token.claim": "true", "id.token.claim": "true", "userinfo.token.claim": "true"
+      }
+    }]
+  }],
+  "users": [
+    {"username": "demo", "enabled": true, "email": "demo@example.test", "emailVerified": true,
+     "firstName": "Demo", "lastName": "User", "groups": ["/neo4j-users"],
+     "credentials": [{"type": "password", "value": "${DEMO_PASSWORD}", "temporary": false}]},
+    {"username": "outsider", "enabled": true, "email": "outsider@example.test", "emailVerified": true,
+     "firstName": "Denied", "lastName": "User",
+     "credentials": [{"type": "password", "value": "${DEMO_PASSWORD}", "temporary": false}]}
+  ]
+}

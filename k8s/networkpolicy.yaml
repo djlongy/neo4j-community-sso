@@ -1,0 +1,11 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: neo4j-sso-entry-only
+spec:
+  podSelector:
+    matchLabels: {app: neo4j-sso}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 4180}

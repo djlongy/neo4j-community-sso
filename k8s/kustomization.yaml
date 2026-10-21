@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: neo4j-sso
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - storage.yaml
+  - networkpolicy.yaml
+configMapGenerator:
+  - name: neo4j-sso-config
+    envs: [oauth2-proxy.env]
+  - name: neo4j-sso-nginx
+    files: [nginx.conf]

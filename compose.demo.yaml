@@ -1,0 +1,36 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.7
+    command: [start-dev, --import-realm, --hostname=http://localhost:9480]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:?Run ./demo.sh}
+      KC_HEALTH_ENABLED: "true"
+      DEMO_PASSWORD: ${DEMO_PASSWORD:?Run ./demo.sh}
+    ports: ["127.0.0.1:9480:8080"]
+    volumes:
+      - ./demo/realm.json:/opt/keycloak/data/import/neo4j-realm.json:ro
+      - identity:/opt/keycloak/data
+    networks: [frontend]
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - 'exec 3<>/dev/tcp/127.0.0.1/9000; printf "GET /health/ready HTTP/1.0\r\n\r\n" >&3; read -r line <&3; [[ "$$line" == *"200"* ]]'
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    restart: unless-stopped
+  sso:
+    environment:
+      OAUTH2_PROXY_SKIP_OIDC_DISCOVERY: "true"
+      OAUTH2_PROXY_LOGIN_URL: http://localhost:9480/realms/neo4j/protocol/openid-connect/auth
+      OAUTH2_PROXY_REDEEM_URL: http://keycloak:8080/realms/neo4j/protocol/openid-connect/token
+      OAUTH2_PROXY_OIDC_JWKS_URL: http://keycloak:8080/realms/neo4j/protocol/openid-connect/certs
+      OAUTH2_PROXY_PROFILE_URL: http://keycloak:8080/realms/neo4j/protocol/openid-connect/userinfo
+    depends_on:
+      keycloak:
+        condition: service_healthy
+volumes:
+  identity: {}

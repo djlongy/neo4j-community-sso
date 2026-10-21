@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neo4j-sso
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: neo4j-sso
+  template:
+    metadata:
+      labels:
+        app: neo4j-sso
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 7474
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: neo4j
+          image: neo4j:2026.10.0
+          securityContext:
+            runAsUser: 7474
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          env:
+            - {name: NEO4J_AUTH, value: none}
+            # Sidecars share the pod network; backends never listen on the pod IP.
+            - {name: NEO4J_server_default__listen__address, value: 127.0.0.1}
+            - name: NEO4J_server_bolt_advertised__address
+              valueFrom:
+                configMapKeyRef: {name: neo4j-sso-config, key: BOLT_ADDRESS}
+            - {name: NEO4J_server_bolt_tls__level, value: DISABLED}
+            - {name: NEO4J_server_memory_heap_initial__size, value: 256m}
+            - {name: NEO4J_server_memory_heap_max__size, value: 512m}
+            - {name: NEO4J_server_memory_pagecache_size, value: 256m}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          startupProbe:
+            exec: {command: [wget, -q, -O, /dev/null, "http://127.0.0.1:7474/"]}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec: {command: [wget, -q, -O, /dev/null, "http://127.0.0.1:7474/"]}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 200m, memory: 768Mi}
+            limits: {cpu: "2", memory: 1536Mi}
+        - name: gateway
+          image: nginx:1.28.0-alpine
+          command: [nginx, -g, "daemon off;"]
+          securityContext:
+            runAsUser: 101
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: nginx, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf, readOnly: true}
+            - {name: nginx-tmp, mountPath: /tmp}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+        - name: sso
+          image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5
+          securityContext:
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          envFrom:
+            - configMapRef: {name: neo4j-sso-config}
+            - secretRef: {name: neo4j-sso-oidc}
+          ports:
+            - {name: sso, containerPort: 4180}
+          startupProbe:
+            httpGet: {path: /ping, port: sso}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /ready, port: sso}
+          livenessProbe:
+            httpGet: {path: /ping, port: sso}
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {cpu: 300m, memory: 128Mi}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: neo4j-sso-data}
+        - name: nginx
+          configMap: {name: neo4j-sso-nginx}
+        - name: nginx-tmp
+          emptyDir: {}

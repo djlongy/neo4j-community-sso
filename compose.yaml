@@ -1,0 +1,69 @@
+name: neo4j-community-sso
+services:
+  neo4j:
+    image: neo4j:2026.10.0
+    environment:
+      NEO4J_AUTH: none
+      NEO4J_server_bolt_advertised__address: ${BOLT_ADDRESS:?Set BOLT_ADDRESS}
+      NEO4J_server_bolt_tls__level: DISABLED
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+    volumes: [data:/data]
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O /dev/null http://localhost:7474/"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  gateway:
+    image: nginx:1.28.0-alpine
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks: [database]
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    restart: unless-stopped
+
+  sso:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5
+    environment:
+      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+      OAUTH2_PROXY_UPSTREAMS: http://gateway:8080
+      OAUTH2_PROXY_PROVIDER: oidc
+      OAUTH2_PROXY_CLIENT_ID: ${OIDC_CLIENT_ID:?Set OIDC_CLIENT_ID}
+      OAUTH2_PROXY_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-unused-public-client}
+      OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:?Set OIDC_ISSUER_URL}
+      OAUTH2_PROXY_REDIRECT_URL: ${PUBLIC_URL:?Set PUBLIC_URL}/oauth2/callback
+      OAUTH2_PROXY_SCOPE: openid email profile
+      OAUTH2_PROXY_EMAIL_DOMAINS: ${EMAIL_DOMAINS:-*}
+      OAUTH2_PROXY_ALLOWED_GROUPS: ${ALLOWED_GROUPS:?Set ALLOWED_GROUPS}
+      OAUTH2_PROXY_COOKIE_SECRET: ${COOKIE_SECRET:?Generate COOKIE_SECRET}
+      OAUTH2_PROXY_COOKIE_NAME: _neo4j_sso
+      OAUTH2_PROXY_COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      OAUTH2_PROXY_COOKIE_SAMESITE: lax
+      OAUTH2_PROXY_COOKIE_CSRF_PER_REQUEST: "true"
+      OAUTH2_PROXY_COOKIE_EXPIRE: 1h
+      OAUTH2_PROXY_COOKIE_REFRESH: 5m
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+      OAUTH2_PROXY_PROXY_WEBSOCKETS: "true"
+      OAUTH2_PROXY_REVERSE_PROXY: ${REVERSE_PROXY:-false}
+      OAUTH2_PROXY_TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-127.0.0.1/32}
+      OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
+      OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
+      OAUTH2_PROXY_REQUEST_LOGGING: "false"
+    ports: ["127.0.0.1:${HTTP_PORT:-7476}:4180"]
+    networks: [frontend, database]
+    depends_on: [gateway]
+    restart: unless-stopped
+
+networks:
+  frontend: {}
+  database:
+    internal: true
+volumes:
+  data: {}

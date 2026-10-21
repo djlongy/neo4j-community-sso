@@ -1,0 +1,25 @@
+name: Check
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  compose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Check shell and Kubernetes rendering
+        run: |
+          bash -n demo.sh
+          kubectl kustomize k8s > /tmp/neo4j-sso.yaml
+          python3 tests/test_cookie_policy.py
+      - name: Start disposable demo
+        run: ./demo.sh
+      - name: Verify SSO and database protocols
+        run: python3 tests/check_sso.py
+      - name: Show container diagnostics on failure
+        if: failure()
+        run: docker compose --env-file .env.demo -f compose.yaml -f compose.demo.yaml logs --tail 50
+      - name: Stop demo
+        if: always()
+        run: ./demo.sh down

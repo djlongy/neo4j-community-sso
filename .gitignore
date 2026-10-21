@@ -1,0 +1,13 @@
+.env
+.env.demo
+.env.*.local
+*.secret.env
+*.secret.yaml
+.agent/
+.agents/
+CLAUDE.md
+__pycache__/
+.test-output/
+*.pem
+*.key
+*.p12
