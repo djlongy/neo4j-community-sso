@@ -4,6 +4,7 @@ metadata:
   name: neo4j-sso
 spec:
   replicas: 1
+  revisionHistoryLimit: 3
   strategy:
     type: Recreate
   selector:
@@ -14,45 +15,32 @@ spec:
       labels:
         app: neo4j-sso
     spec:
+      serviceAccountName: neo4j-sso
       automountServiceAccountToken: false
       enableServiceLinks: false
+      terminationGracePeriodSeconds: 90
       securityContext:
         runAsNonRoot: true
         fsGroup: 7474
         seccompProfile:
           type: RuntimeDefault
-      containers:
-        - name: neo4j
+      initContainers:
+        - name: prepare-config
           image: neo4j:2026.10.0
+          command: [sh, -c, "cp -R /var/lib/neo4j/conf/. /config/"]
           securityContext:
             runAsUser: 7474
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
-          env:
-            - {name: NEO4J_AUTH, value: none}
-            # Sidecars share the pod network; backends never listen on the pod IP.
-            - {name: NEO4J_server_default__listen__address, value: 127.0.0.1}
-            - name: NEO4J_server_bolt_advertised__address
-              valueFrom:
-                configMapKeyRef: {name: neo4j-sso-config, key: BOLT_ADDRESS}
-            - {name: NEO4J_server_bolt_tls__level, value: DISABLED}
-            - {name: NEO4J_server_memory_heap_initial__size, value: 256m}
-            - {name: NEO4J_server_memory_heap_max__size, value: 512m}
-            - {name: NEO4J_server_memory_pagecache_size, value: 256m}
           volumeMounts:
-            - {name: data, mountPath: /data}
-          startupProbe:
-            exec: {command: [wget, -q, -O, /dev/null, "http://127.0.0.1:7474/"]}
-            periodSeconds: 5
-            failureThreshold: 60
-          readinessProbe:
-            exec: {command: [wget, -q, -O, /dev/null, "http://127.0.0.1:7474/"]}
-            periodSeconds: 10
+            - {name: neo4j-config, mountPath: /config}
           resources:
-            requests: {cpu: 200m, memory: 768Mi}
-            limits: {cpu: "2", memory: 1536Mi}
+            requests: {cpu: 10m, memory: 16Mi, ephemeral-storage: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi, ephemeral-storage: 32Mi}
         - name: gateway
+          restartPolicy: Always
           image: nginx:1.28.0-alpine
           command: [nginx, -g, "daemon off;"]
           securityContext:
@@ -64,10 +52,15 @@ spec:
           volumeMounts:
             - {name: nginx, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf, readOnly: true}
             - {name: nginx-tmp, mountPath: /tmp}
+          readinessProbe:
+            exec: {command: [wget, -q, -T, "3", -O, /dev/null, "http://127.0.0.1:8080/"]}
+            timeoutSeconds: 5
+            periodSeconds: 5
           resources:
-            requests: {cpu: 10m, memory: 16Mi}
-            limits: {cpu: 200m, memory: 64Mi}
+            requests: {cpu: 10m, memory: 16Mi, ephemeral-storage: 16Mi}
+            limits: {cpu: 200m, memory: 64Mi, ephemeral-storage: 128Mi}
         - name: sso
+          restartPolicy: Always
           image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5
           securityContext:
             runAsUser: 65532
@@ -83,18 +76,73 @@ spec:
           startupProbe:
             httpGet: {path: /ping, port: sso}
             periodSeconds: 5
+            timeoutSeconds: 3
             failureThreshold: 60
           readinessProbe:
             httpGet: {path: /ready, port: sso}
+            periodSeconds: 5
+            timeoutSeconds: 3
           livenessProbe:
             httpGet: {path: /ping, port: sso}
+            timeoutSeconds: 3
+            failureThreshold: 6
           resources:
             requests: {cpu: 20m, memory: 32Mi}
             limits: {cpu: 300m, memory: 128Mi}
+      containers:
+        - name: neo4j
+          image: neo4j:2026.10.0
+          securityContext:
+            runAsUser: 7474
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - {name: NEO4J_AUTH, value: none}
+            # Sidecars share the pod network; backends never listen on the pod IP.
+            - {name: NEO4J_server_default__listen__address, value: 127.0.0.1}
+            - name: NEO4J_server_bolt_advertised__address
+              valueFrom:
+                configMapKeyRef: {name: neo4j-sso-config, key: BOLT_ADDRESS}
+            - {name: NEO4J_server_bolt_tls__level, value: DISABLED}
+            - {name: NEO4J_server_memory_heap_initial__size, value: 256m}
+            - {name: NEO4J_server_memory_heap_max__size, value: 512m}
+            - {name: NEO4J_server_memory_pagecache_size, value: 256m}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: neo4j-config, mountPath: /var/lib/neo4j/conf}
+            - {name: neo4j-run, mountPath: /var/lib/neo4j/run}
+            - {name: neo4j-logs, mountPath: /logs}
+            - {name: neo4j-tmp, mountPath: /tmp}
+          lifecycle:
+            preStop:
+              # Allow ingress endpoint removal before stopping the database.
+              exec: {command: [sh, -c, "sleep 10"]}
+          startupProbe:
+            exec: {command: [wget, -q, -O, /dev/null, "http://127.0.0.1:7474/"]}
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            exec: {command: [wget, -q, -O, /dev/null, "http://127.0.0.1:7474/"]}
+            periodSeconds: 10
+            timeoutSeconds: 10
+          resources:
+            requests: {cpu: 200m, memory: 768Mi, ephemeral-storage: 128Mi}
+            limits: {cpu: "2", memory: 1536Mi, ephemeral-storage: 1Gi}
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: neo4j-sso-data}
         - name: nginx
           configMap: {name: neo4j-sso-nginx}
         - name: nginx-tmp
-          emptyDir: {}
+          emptyDir: {sizeLimit: 64Mi}
+        - name: neo4j-config
+          emptyDir: {sizeLimit: 16Mi}
+        - name: neo4j-run
+          emptyDir: {sizeLimit: 16Mi}
+        - name: neo4j-logs
+          emptyDir: {sizeLimit: 512Mi}
+        - name: neo4j-tmp
+          emptyDir: {sizeLimit: 128Mi}

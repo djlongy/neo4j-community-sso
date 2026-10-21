@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: neo4j-sso
 resources:
   - namespace.yaml
+  - serviceaccount.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml

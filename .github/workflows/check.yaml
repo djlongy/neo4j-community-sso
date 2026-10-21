@@ -3,15 +3,36 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  kubernetes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install pinned validation tools
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/k8s-bin"
+          fetch() {
+            curl -fsSL "https://github.com/$1/releases/download/$2/$3" -o "$RUNNER_TEMP/tool.tar.gz"
+            echo "$4  $RUNNER_TEMP/tool.tar.gz" | sha256sum -c -
+            tar -xzf "$RUNNER_TEMP/tool.tar.gz" -C "$RUNNER_TEMP/k8s-bin"
+          }
+          fetch kubernetes-sigs/kustomize kustomize/v5.8.1 kustomize_v5.8.1_linux_amd64.tar.gz 029a7f0f4e1932c52a0476cf02a0fd855c0bb85694b82c338fc648dcb53a819d
+          fetch yannh/kubeconform v0.8.0 kubeconform-linux-amd64.tar.gz 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+          fetch stackrox/kube-linter v0.8.3 kube-linter-linux.tar.gz 1a6d8419b11971372971fdbc22682b684ebfb7cf1c39591662d1b6ca736c41df
+          fetch FairwindsOps/pluto v5.24.4 pluto_5.24.4_linux_amd64.tar.gz 1e5077ce1016fb0bb8ce0103c12b7ca8666eb3959d787ecfc95d9b8acd507147
+          fetch FairwindsOps/polaris v10.2.5 polaris_10.2.5_linux_amd64.tar.gz 21c979f649e9600ad41d907d188c6e01b2c7ae4dc0cdbf4df392120c950e1fca
+          echo "$RUNNER_TEMP/k8s-bin" >> "$GITHUB_PATH"
+      - name: Validate Kubernetes design
+        run: bash tests/check_k8s.sh
   compose:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Check shell and Kubernetes rendering
+      - name: Check shell and cookie handling
         run: |
           bash -n demo.sh
-          kubectl kustomize k8s > /tmp/neo4j-sso.yaml
           python3 tests/test_cookie_policy.py
       - name: Start disposable demo
         run: ./demo.sh

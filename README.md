@@ -9,7 +9,7 @@ First run: [QUICKSTART.md](QUICKSTART.md).
 ## Requirements
 
 - Docker Engine with Compose v2.24 or newer, Bash, curl and Python 3.10+ for the demo.
-- Kubernetes 1.25+ and kubectl with Kustomize for the [Kubernetes configuration](k8s/README.md).
+- Kubernetes 1.29+ with native sidecar support enabled, and kubectl with Kustomize, for the [Kubernetes configuration](k8s/README.md).
 - An OIDC provider with authorization-code + PKCE support, verified email and a groups claim for your deployment.
 
 ## Config
@@ -60,7 +60,7 @@ Neo4j's own authentication is disabled inside that boundary. **Every admitted us
 
 The proxy cookie lasts one hour and refreshes after five minutes. `/oauth2/sign_out` clears the proxy cookie; it does not end the IdP session. Established WebSockets are not reauthorized on every query, so sign-out, group removal or cookie expiry does not immediately terminate them.
 
-The Kubernetes configuration runs the three application containers in one pod, with Neo4j and nginx listening on pod-local loopback. Its Service and network policy expose only the SSO listener. It uses one persistent database volume and a single replica; updates recreate the pod.
+The Kubernetes configuration runs the three application containers in one pod, with native proxy sidecars and pod-local backend listeners. It exposes only the SSO listener, uses read-only image filesystems with bounded writable volumes, and keeps the database on one persistent volume. A single replica and Recreate updates mean planned downtime. During shutdown, Neo4j waits ten seconds for endpoint removal; Kubernetes keeps the proxies running until Neo4j exits, within a 90-second pod grace period.
 
 ## Out of scope
 
@@ -78,4 +78,4 @@ python3 tests/check_sso.py
 
 Expect six PASS lines covering anonymous denial, PKCE login, both HTTP APIs, Bolt WebSocket negotiation and group denial. This check automates Keycloak's login form; use your own provider's login test for other IdPs.
 
-The same checks pass on RKE2 1.36.4 through nginx ingress with trusted HTTPS and persistent Ceph storage. The RKE test also verifies backend-port isolation and persistence across pod recreation. This is protocol-level validation; interactive Browser query execution is not part of the automated check.
+The same checks pass on RKE2 1.36.4 through nginx ingress with trusted HTTPS and persistent Ceph storage. The RKE test also verifies backend-port isolation and persistence across pod recreation. This is protocol-level validation; interactive Browser query execution is not part of the automated check. CI separately runs `bash tests/check_k8s.sh` with pinned Kustomize, kubeconform, kube-linter, Polaris and Pluto versions.
